@@ -1,0 +1,363 @@
+---
+name: bc-review
+description: "Use this skill to review, audit, or assess a Bounded Context in two phases: first inspect its skill/specification files for failure paths, boundaries, ambiguity, contradictions, authorization, tenant isolation, concurrency, external failures, observability, and audit requirements; then verify every finding against implementation code and tests. Trigger phrases: BC review, bounded context review, review skill files, specification audit, check findings in code, documentation versus implementation, gap analysis."
+argument-hint: "<bounded-context-name> [full|spec-only|code-verification]"
+---
+
+# Bounded Context Two-Phase Review
+
+## Purpose
+
+Perform a repeatable, evidence-based review of one Bounded Context (BC):
+
+1. **Specification review** — identify weaknesses in the BC's skill files without inspecting code.
+2. **Code verification** — determine whether each reported concern is covered, partially covered,
+   missing, or intentionally deferred in implementation and tests.
+
+This is a read-only review. Do not modify skill files or source code unless the user starts a
+separate refinement or implementation task.
+
+## Inputs
+
+- BC name, matching `.github/skills/<bc-name>/`
+- Review mode:
+  - `full` — run both phases; default
+  - `spec-only` — stop after Phase 1
+  - `code-verification` — verify an existing findings list supplied by the user
+- Optional business description from the user
+
+If the BC or mode is unclear, ask one focused question using the question tool.
+
+## Non-Negotiable Rules
+
+1. Review one BC per invocation.
+2. Keep Phase 1 code-blind: do not inspect `src/**`, migrations, or tests.
+3. Do not silently redesign adjacent BCs. Record cross-BC concerns as deferred items.
+4. Every material claim must cite an exact file and line range.
+5. Distinguish documented intent, executable behavior, and test coverage.
+6. A test asserting behavior is evidence of intent and regression protection, not proof that all
+   runtime paths are safe.
+7. Do not report style, naming, or speculative architecture preferences.
+8. Prioritize correctness, security, data isolation, financial duplication, and recoverability.
+9. Never expose credentials, tokens, PII, gift-card secrets, or raw sensitive log contents in the
+   report.
+10. Do not edit files during either review phase.
+
+## Phase 0 — Scope and Context
+
+### 0.1 Inventory documentation
+
+Read:
+
+1. Every file under `.github/skills/<bc-name>/`
+2. Project-wide conventions (`CLAUDE.md`, `AGENTS.md`, or equivalent)
+3. Skill files for every adjacent BC named by the target BC
+
+Reading adjacent BC documentation is required to identify ownership boundaries. Do not inspect
+adjacent implementation code during this phase.
+
+### 0.2 Establish business intent
+
+If the user has not already described the intended behavior, ask:
+
+> Please describe the business behavior of the `<bc-name>` BC — what triggers it, what it does,
+> and what outcomes it produces.
+
+Do not infer business intent solely from route or class names.
+
+### 0.3 Declare the scope lock
+
+Before reporting findings, state:
+
+```text
+Scope lock: This review covers the <bc-name> BC only.
+
+In scope:
+- <behavior and contracts owned by this BC>
+
+Out of scope:
+- <adjacent BC>: <what it owns>
+
+Cross-BC concerns will be recorded as deferred items, not redesigned here.
+```
+
+### 0.4 Check cohesion
+
+Assess whether the BC still has one reason to change. Flag a cohesion concern when at least two
+of these signals occur:
+
+- Independent business capabilities
+- Unrelated aggregates or lifecycles
+- Different actors triggering independent workflows
+- Unrelated external integrations
+- Different operational or authorization models
+- Different reasons to change
+
+Report the concern, but continue the review unless the user explicitly requests refinement.
+
+## Phase 1 — Specification Review
+
+Review only the target and adjacent documentation. Evaluate each operation, lifecycle transition,
+integration, aggregate, job, and endpoint through all lenses below.
+
+### Lens 1 — Missing failure paths
+
+Check for:
+
+- Validation rejection
+- Authentication and authorization failure
+- Missing, stale, revoked, or terminal domain records
+- Partial success between sequential steps
+- Dependency acceptance followed by timeout or local persistence failure
+- Retry after an unknown outcome
+- Malformed or incomplete dependency responses
+- Cleanup, compensation, reconciliation, and manual recovery
+- Unknown enum/status values
+
+### Lens 2 — Boundary conditions
+
+Check:
+
+- Zero, negative, fractional, maximum, overflow, empty, and omitted values
+- String lengths, formats, precision, currency, timezone, and UUID validation
+- Empty and unexpectedly large collections
+- First/last page and page beyond available results
+- Duplicate identifiers, idempotency keys, and references
+- State-transition boundaries and terminal-state behavior
+- Deterministic selection when several candidates exist
+
+### Lens 3 — Ambiguity
+
+Flag language that permits multiple materially different implementations:
+
+- Undefined ownership or source of truth
+- “First,” “latest,” or “default” without ordering rules
+- Undefined status mapping or fallback
+- Undefined retryability or error contract
+- Unconfirmed external contracts presented as settled behavior
+- Terms used without glossary definitions
+
+### Lens 4 — Contradictions
+
+Compare:
+
+- `SKILL.md` against domain model, BDD scenarios, and ACL files
+- List versus detail semantics
+- Request versus response identifiers
+- Aggregate invariants versus fallback behavior
+- Stated parity versus unsupported or omitted capabilities
+- Target BC assumptions against adjacent BC contracts
+
+### Lens 5 — Authorization and tenant isolation
+
+Check separately:
+
+- Authentication: who is the caller?
+- Authorization: which operation may the caller perform?
+- Resource ownership: does the resource belong to the tenant, client, user, or wallet?
+- Tenant resolution: when and how is tenant context established?
+- Opaque external IDs: are they verified before data is returned?
+- Cross-tenant external calls: does CLS/database isolation actually protect them?
+- Disabled/revoked clients, environment separation, scopes, roles, and capability grants
+- Sensitive fields exposed by read endpoints
+
+Tenant-scoped database access does not prove ownership for data fetched from an external service.
+
+### Lens 6 — Atomicity and concurrency
+
+For every multi-step workflow, identify:
+
+- Transaction boundaries
+- Locks, compare-and-set rules, and unique constraints
+- Get-then-create races
+- Shared mutable resources such as active carts
+- Duplicate submission and request-level idempotency
+- Idempotency-key scope, retention, and payload-conflict behavior
+- “External success, local failure” recovery
+- Saga, compensation, retry, and reconciliation behavior
+- Concurrent state transitions such as revocation during submission
+
+### Lens 7 — External-service failures
+
+Require defined behavior for:
+
+- Timeout and connection failure
+- Rate limiting and `Retry-After`
+- Upstream validation, authentication, conflict, and not-found responses
+- Upstream `5xx`
+- Malformed successful responses
+- Eventual consistency after create/update
+- Token refresh/retry
+- Retry limits, backoff, jitter, and circuit breaking where appropriate
+- Stable public error translation and retry-safety guidance
+
+### Lens 8 — Observability and audit
+
+Check for:
+
+- Correlation/request IDs across BC boundaries
+- Tenant, client, actor, environment, and resource identifiers
+- Step-level workflow outcomes
+- Dependency latency and normalized error metrics
+- Duplicate, orphan, retry, and reconciliation metrics
+- Security and state-transition audit records
+- Alerting versus expected unsupported behavior
+- Log redaction requirements for tokens, credentials, PII, and fulfilment secrets
+- Retention and erasure requirements for persisted audit/PII data
+
+### Phase 1 evidence and severity
+
+Use:
+
+- **Critical** — plausible cross-tenant disclosure, unauthorized sensitive access, duplicate
+  financial fulfilment, or unrecoverable integrity loss
+- **High** — likely production failure, orphaned external state, material contract break, or no
+  operational traceability
+- **Medium** — meaningful edge case, ambiguity, or inconsistency with bounded impact
+- **Low** — real but limited maintainability or boundary concern
+
+For each finding provide:
+
+1. Severity
+2. Review lens
+3. Concise finding
+4. Exact documentation citations
+5. Consequence
+6. Required decision or open question
+
+Do not call an intentional, explicitly documented `501` or deferred capability a defect.
+
+### Phase 1 output
+
+Use the Phase 1 table from [report-template.md](./references/report-template.md), followed by:
+
+- Prioritized open questions
+- Contradictions summary
+- Deferred cross-BC items
+- Cohesion result
+
+For `spec-only`, stop here.
+
+## Phase 2 — Code Verification
+
+### 2.1 Build a verification checklist
+
+Turn every Phase 1 finding into one verification item. Preserve its identifier and wording so the
+documentation and implementation reports remain traceable.
+
+For `code-verification` mode, use the findings supplied by the user. If citations or intended
+behavior are missing, read the target BC documentation before inspecting code.
+
+### 2.2 Trace only relevant implementation
+
+Inspect:
+
+1. `src/<bc-name>/**`
+2. Migrations and models used by the BC
+3. Tests for the BC
+4. Only direct dependency paths needed to verify a finding
+
+Trace continuous runtime paths end to end:
+
+```text
+controller/consumer
+  -> guard/interceptor
+  -> application service
+  -> repository or outbound port
+  -> adapter/external dependency
+  -> persistence/migration
+```
+
+Do not perform a general review of adjacent BC code. Stop at the point where enough evidence
+exists to classify the target finding.
+
+For a large BC, a read-only code-review or code-explorer subagent may own Phase 2. Give it the
+complete Phase 1 findings and prohibit edits and style feedback.
+
+### 2.3 Inspect tests as separate evidence
+
+For each finding, determine:
+
+- Is the safeguard implemented?
+- Is it enforced at application, database, or external-adapter level?
+- Is the failure branch tested?
+- Are concurrency and retry semantics genuinely exercised or merely mocked?
+- Does a DTO test bypass the actual validation pipeline?
+
+Absence of a test does not prove absence of behavior. Presence of a test does not eliminate
+uncovered races or integration failures.
+
+### 2.4 Classification
+
+Classify every finding exactly once:
+
+| Status | Definition |
+|---|---|
+| **Covered** | Implementation enforces the complete requirement and meaningful tests protect it |
+| **Partially covered** | A safeguard exists, but one or more material paths or guarantees remain |
+| **Missing** | No effective implementation addresses the concern |
+| **Not applicable / deferred** | The capability is explicitly unsupported or owned elsewhere, and current behavior matches that decision |
+| **Cannot verify** | Required source, contract, generated code, or environment behavior is unavailable |
+
+Do not classify a concern as Covered merely because:
+
+- Authentication exists but resource ownership is unchecked
+- A unique constraint exists but its conflict is not recovered
+- Downstream idempotency exists but request retries generate new downstream keys
+- A timeout exists but unknown outcomes can duplicate side effects
+- Logs exist but lack correlation, audit semantics, or redaction
+- Happy-path tests exist
+
+### 2.5 Find undocumented safeguards
+
+After verifying findings, make one focused pass for material safeguards present in code but absent
+or understated in the target BC documentation, including:
+
+- Database uniqueness or locking
+- Retry and token-refresh behavior
+- Idempotency guarantees
+- Sensitive-field stripping
+- Error translation
+- Persistence recovery
+
+List only safeguards relevant to the reviewed findings.
+
+### Phase 2 output
+
+Use the Phase 2 table from [report-template.md](./references/report-template.md).
+
+Each row must contain:
+
+- Original concern
+- Code status
+- Implementation evidence with exact line ranges
+- Test evidence, or explicitly “No meaningful test found”
+- Residual risk
+
+Finish with:
+
+1. Counts by status
+2. Top three to five implementation priorities
+3. Safeguards present in code but missing from documentation
+4. Deferred cross-BC items
+5. Explicit statement that no files were modified
+
+## Quality Checklist
+
+Before returning the final report, verify:
+
+- [ ] One BC remained in scope
+- [ ] Phase 1 did not inspect implementation code
+- [ ] Every Phase 1 finding appears once in Phase 2
+- [ ] Every material claim has an exact citation
+- [ ] Authorization and resource ownership were assessed separately
+- [ ] Database tenant isolation and external-resource ownership were assessed separately
+- [ ] Request idempotency and downstream idempotency were assessed separately
+- [ ] Unknown-outcome and partial-success paths were considered
+- [ ] External failures include timeout, rate limit, `5xx`, malformed response, and eventual consistency
+- [ ] Observability includes both traceability and redaction
+- [ ] Tests were treated as supporting evidence, not conclusive proof
+- [ ] Undocumented safeguards were reported
+- [ ] Cross-BC concerns were deferred, not redesigned
+- [ ] No files were modified
+
